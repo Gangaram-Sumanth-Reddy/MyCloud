@@ -2,6 +2,10 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
+if (!import.meta.env.VITE_API_BASE_URL) {
+	console.warn('[api] VITE_API_BASE_URL not set – falling back to http://localhost:5000/api');
+}
+
 export const api = axios.create({
 	baseURL: API_BASE_URL,
 });

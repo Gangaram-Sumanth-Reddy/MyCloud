@@ -34,6 +34,23 @@ async function uploadFile(req, res) {
 	if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 	const { originalname, filename, mimetype, size } = req.file;
 	const folder = (req.body.folder || 'root').trim() || 'root';
+	
+	// Check user storage quota
+	const user = await User.findById(req.user.id);
+	const storageLimit = Math.max(user.storageLimitBytes || 0, DEFAULT_STORAGE_LIMIT);
+	const usedStorage = user.usedStorageBytes || 0;
+	
+	if (usedStorage + size > storageLimit) {
+		// Delete uploaded file if quota exceeded
+		if (env.STORAGE_DRIVER === 'local') {
+			const uploadPath = path.resolve(env.PROJECT_ROOT, env.UPLOAD_DIR, filename);
+			if (fs.existsSync(uploadPath)) {
+				fs.unlinkSync(uploadPath);
+			}
+		}
+		return res.status(413).json({ message: 'Storage quota exceeded' });
+	}
+	
 	const fileDoc = await FileModel.create({
 		userId: req.user.id,
 		originalName: originalname,
@@ -54,9 +71,19 @@ async function downloadFile(req, res) {
 	if (!file) return res.status(404).json({ message: 'File not found' });
 	if (file.storageDriver === 'local') {
 		const abs = path.resolve(env.PROJECT_ROOT, file.path);
+		if (!fs.existsSync(abs)) {
+			return res.status(404).json({ message: 'File not found on disk' });
+		}
 		res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
 		res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
-		return fs.createReadStream(abs).pipe(res);
+		const stream = fs.createReadStream(abs);
+		stream.on('error', (error) => {
+			console.error('File stream error:', error);
+			if (!res.headersSent) {
+				res.status(500).json({ message: 'Error reading file' });
+			}
+		});
+		return stream.pipe(res);
 	}
 	return res.status(501).json({ message: 'S3 download not implemented in this starter' });
 }
@@ -67,9 +94,19 @@ async function previewFile(req, res) {
 	if (!file) return res.status(404).json({ message: 'File not found' });
 	if (file.storageDriver === 'local') {
 		const abs = path.resolve(env.PROJECT_ROOT, file.path);
+		if (!fs.existsSync(abs)) {
+			return res.status(404).json({ message: 'File not found on disk' });
+		}
 		res.setHeader('Content-Type', file.mimeType || mime.lookup(file.originalName) || 'application/octet-stream');
 		res.setHeader('Content-Disposition', 'inline');
-		return fs.createReadStream(abs).pipe(res);
+		const stream = fs.createReadStream(abs);
+		stream.on('error', (error) => {
+			console.error('File stream error:', error);
+			if (!res.headersSent) {
+				res.status(500).json({ message: 'Error reading file' });
+			}
+		});
+		return stream.pipe(res);
 	}
 	return res.status(501).json({ message: 'S3 preview not implemented in this starter' });
 }
@@ -80,7 +117,14 @@ async function deleteFile(req, res) {
 	if (!file) return res.status(404).json({ message: 'File not found' });
 	if (file.storageDriver === 'local' && file.path) {
 		const abs = path.resolve(env.PROJECT_ROOT, file.path);
-		if (fs.existsSync(abs)) fs.unlinkSync(abs);
+		try {
+			if (fs.existsSync(abs)) {
+				fs.unlinkSync(abs);
+			}
+		} catch (error) {
+			console.error('Error deleting file from disk:', error);
+			// Continue with database deletion even if file deletion fails
+		}
 	}
 	await FileModel.deleteOne({ _id: file._id });
 	await User.findByIdAndUpdate(req.user.id, { $inc: { usedStorageBytes: -file.sizeBytes } });
@@ -91,11 +135,13 @@ async function renameFile(req, res) {
 	const errors = validationResult(req);
 	if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 	const { name } = req.body;
+	const trimmed = name.trim();
+	if (!trimmed) return res.status(400).json({ message: 'File name required' });
 	const file = await FileModel.findOne({ _id: req.params.id, userId: req.user.id });
 	if (!file) return res.status(404).json({ message: 'File not found' });
 	// Preserve extension if user didn't include one
 	const ext = path.extname(file.originalName);
-	const newName = path.extname(name) ? name : `${name}${ext}`;
+	const newName = path.extname(trimmed) ? trimmed : `${trimmed}${ext}`;
 	file.originalName = newName;
 	await file.save();
 	return res.json(file);

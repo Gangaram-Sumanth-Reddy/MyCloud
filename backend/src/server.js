@@ -63,9 +63,14 @@ app.use((err, _req, res, _next) => {
 
 // Start server
 const start = async () => {
-	await connectToDatabase(env.MONGODB_URI);
-	const port = env.PORT || 5000;
-	app.listen(port, () => console.log(`✅ API running on port ${port}`));
+	try {
+		await connectToDatabase(env.MONGODB_URI);
+		const port = env.PORT || 5000;
+		app.listen(port, () => console.log(`✅ API running on port ${port}`));
+	} catch (error) {
+		console.error('❌ Failed to start server:', error.message);
+		process.exit(1);
+	}
 };
 
 start();

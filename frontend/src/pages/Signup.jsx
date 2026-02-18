@@ -6,26 +6,63 @@ import { useAuth } from '../context/AuthContext';
 import ModeToggle from '../components/ModeToggle';
 
 export default function Signup() {
-  const { signup } = useAuth();
-  const nav = useNavigate();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+	const { signup } = useAuth();
+	const nav = useNavigate();
+	const [name, setName] = useState('');
+	const [email, setEmail] = useState('');
+	const [password, setPassword] = useState('');
+	const [loading, setLoading] = useState(false);
+	const [formError, setFormError] = useState('');
+	const [infoMessage, setInfoMessage] = useState('');
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await signup(name, email, password);
-      toast.success('Account created!');
-      nav('/app');
-    } catch (err) {
-      toast.error(err?.response?.data?.message || 'Signup failed');
-    } finally {
-      setLoading(false);
-    }
-  };
+	const handleSignup = async (event) => {
+		event.preventDefault();
+		setFormError('');
+		setInfoMessage('');
+
+		const trimmedName = name.trim();
+		const trimmedEmail = email.trim();
+		const trimmedPassword = password.trim();
+
+		if (!trimmedName || !trimmedEmail || !trimmedPassword) {
+			const message = 'Please fill in all required fields.';
+			setFormError(message);
+			toast.error(message);
+			return;
+		}
+
+		if (trimmedPassword.length < 6) {
+			const message = 'Password must be at least 6 characters long.';
+			setFormError(message);
+			toast.error(message);
+			return;
+		}
+
+		setLoading(true);
+		try {
+			const result = await signup(trimmedName, trimmedEmail, trimmedPassword);
+			toast.success('Account created!');
+			if (result?.requiresVerification) {
+				const verificationMessage = 'Check your email inbox to verify your account.';
+				setInfoMessage(verificationMessage);
+				toast.info(verificationMessage);
+			}
+			nav('/app');
+		} catch (error) {
+			const rawDetails = Array.isArray(error?.details) ? error.details : [];
+			const detailMessages = rawDetails.map((detail) => detail?.msg || detail?.message).filter(Boolean);
+			const message = detailMessages[0] || error?.message || 'Unable to sign up. Please try again.';
+			const combinedMessages = [message, ...detailMessages.slice(1)];
+			setFormError(combinedMessages.join('\n'));
+			if (combinedMessages.length > 0) {
+				combinedMessages.forEach((msg) => toast.error(msg));
+			} else {
+				toast.error('Unable to sign up. Please try again.');
+			}
+		} finally {
+			setLoading(false);
+		}
+	};
 
   return (
     <div className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden px-6 py-12 sm:px-10">
@@ -44,7 +81,7 @@ export default function Signup() {
             <h1 className="text-3xl font-semibold text-zinc-900 dark:text-white">Create account</h1>
             <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">Set up your workspace in the cloud</p>
           </div>
-          <form onSubmit={onSubmit} className="space-y-4">
+			<form onSubmit={handleSignup} className="space-y-4">
             <label className="block">
               <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Name</span>
               <input
@@ -77,14 +114,24 @@ export default function Signup() {
                 required
               />
             </label>
-            <motion.button
-              type="submit"
-              disabled={loading}
-              whileTap={{ scale: 0.98 }}
-              className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-orange-400 px-4 py-3 text-sm font-semibold text-white shadow-neon transition hover:brightness-110 disabled:opacity-60"
-            >
-              {loading ? 'Creating…' : 'Create account'}
-            </motion.button>
+			{formError && (
+				<div className="space-y-1">
+					{formError.split('\n').map((line, index) => (
+						<p key={line + index} className="text-sm font-medium text-rose-500">
+							{line}
+						</p>
+					))}
+				</div>
+			)}
+				{infoMessage && <p className="text-sm font-medium text-emerald-500">{infoMessage}</p>}
+				<motion.button
+					type="submit"
+					disabled={loading}
+					whileTap={{ scale: 0.98 }}
+					className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-orange-400 px-4 py-3 text-sm font-semibold text-white shadow-neon transition hover:brightness-110 disabled:opacity-60"
+				>
+					{loading ? 'Creating account…' : 'Create account'}
+				</motion.button>
           </form>
         </div>
         <p className="mt-6 text-center text-sm text-zinc-600 dark:text-zinc-400">
